@@ -100,6 +100,17 @@ h2.sec .bar{width:8px;height:24px;border-radius:6px;background:var(--grad)}
 .gcard .pct{font-size:12px;font-weight:700;margin-top:6px;color:var(--muted)}
 .gcard.done{background:linear-gradient(120deg,#fff,#f0fff4)}
 .gcard.done .emoji{animation:none}
+.gcard.ready{border-color:#ffd166;background:linear-gradient(120deg,#fff,#fff8e6)}
+.gcard.ready .meta{color:#8a5200;font-weight:800}
+.sug-card{display:flex;align-items:center;gap:12px;text-align:left;background:#fff8e6;border:2px solid #ffe0a3;border-radius:16px;padding:12px 14px;margin:14px 0 4px}
+.sug-emo{font-size:30px;flex:none}
+.sug-txt{flex:1;min-width:0;font-size:13px;line-height:1.5;color:#5c4a2a}
+.sug-txt b{display:block;font-size:14px;color:#3d2f12;margin-bottom:2px}
+.sug-card .btn{flex:none;white-space:nowrap}
+.sync-tip{display:flex;align-items:center;gap:10px;justify-content:space-between;font-size:12.5px;line-height:1.5;color:var(--muted);background:#f7f4ff;border-radius:12px;padding:8px 10px}
+.sync-tip b{color:#5b3fd4}
+.sync-tip button{flex:none;border:none;background:#fff;border-radius:999px;padding:5px 10px;font:inherit;font-weight:800;color:#5b3fd4;cursor:pointer}
+@media(max-width:640px){.sug-card{flex-wrap:wrap}.sug-card .btn{width:100%}}
 
 /* ===== 单词库 ===== */
 .qtab{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
@@ -860,30 +871,59 @@ function renderGroupGrid(){
     const pr = groupProgress(g.n);
     const done = pr.done;
     const card = document.createElement('div');
-    card.className = 'gcard'+(done?' done':'');
-    card.onclick = ()=>openGroup(i);
+    const readyCloze = pr.shortcut && !pr.clozeDone;      // 词都在今日任务学过了，差完形巩固
+    card.className = 'gcard'+(done?' done':'')+(readyCloze?' ready':'');
+    card.onclick = ()=>openGroup(i, readyCloze ? 'cloze' : undefined);
+    const status = done ? '✅ 已完成 · 完形最佳 '+pr.best+' 分'
+      : readyCloze ? '📖 词都学过了 · 来做完形巩固 ✍️'
+      : (pr.learned>0 || pr.stages>0) ? '🚧 进行中'
+      : '⏳ 尚未开始';
     card.innerHTML = `
       <div class="top"><span class="num">第 ${g.n} 组 · ${g.words.length} 词</span>
         <span class="qbadge q${g.quadrant}">${QUAD_META[g.quadrant].icon} ${QUAD_META[g.quadrant].label}</span></div>
       <span class="emoji">${emoji}</span>
       <h3>${PASSAGES[i].title}</h3>
-      <div class="meta">${done?'✅ 已完成 · 最佳 '+pr.best+' 分':(pr.stages>0?'🚧 进行中 · '+pr.stages+'/4 阶段':'⏳ 尚未开始')}</div>
+      <div class="meta">${status}</div>
       <div class="prog"><i style="width:${pr.pct}%;background:${QUAD_META[g.quadrant].color}"></i></div>
-      <div class="pct">进度 ${pr.pct}%</div>`;
+      <div class="pct">已学 ${pr.learned}/${pr.total} 词${pr.stages ? ' · 闯关 '+pr.stages+'/4' : ''}</div>`;
     grid.appendChild(card);
   });
 }
+/* 组进度：今日任务和闯关模式共用同一份单词记录，这里两边都算进去 */
+function groupLearned(n){
+  const g = GROUPS.find(x=>x.n===n);
+  if(!g) return {learned:0, total:0};
+  return { learned: g.words.filter(w=>progress.words[w.word]).length, total: g.words.length };
+}
 function groupProgress(n){
-  const g = progress.groups[n];
-  if(!g) return {done:false,best:0,pct:0,stages:0};
+  const g = progress.groups[n] || {};
   const stages = g.stages || {};
   const doneStages = STAGES.filter(s=>stages[s.key]).length;
-  const pct = Math.round(doneStages/STAGES.length*100);
-  return {done:!!g.done, best:g.best||0, pct, stages:doneStages};
+  const {learned, total} = groupLearned(n);
+  const allLearned = total>0 && learned===total;
+  // 捷径：这组的词全是在今日任务学的（没走闯关的「认识」），可以直接做后面的关卡
+  const shortcut = allLearned && !stages.flash;
+  const clozeDone = !!stages.cloze;
+  const done = !!g.done || (shortcut && clozeDone);
+  const pct = total ? Math.round(learned/total*100) : 0;
+  return {done, best:g.best||0, pct, stages:doneStages, learned, total, allLearned, shortcut, clozeDone};
+}
+function pendingClozeGroups(){
+  return GROUPS.map((g,i)=>({g, i, pr:groupProgress(g.n)})).filter(x=> x.pr.shortcut && !x.pr.clozeDone);
+}
+function clozeSuggestHtml(item, isNew){
+  if(!item) return '';
+  const {g, i} = item;
+  return `<div class="sug-card">
+      <span class="sug-emo">${GROUP_EMOJI[g.n-1] || '📗'}</span>
+      <div class="sug-txt"><b>${isNew ? '🎉 第 '+g.n+' 组的 '+g.words.length+' 个词全部学完了！' : '第 '+g.n+' 组的词你都学过了'}</b>
+      <span>做一篇它的完形填空〈${esc(PASSAGES[i].title)}〉，把这些词放回文章里巩固一下，约 5 分钟。</span></div>
+      <button class="btn sm" onclick="openGroup(${i},'cloze')">✍️ 去做完形</button>
+    </div>`;
 }
 
 /* ===== 组详情 ===== */
-function openGroup(i){
+function openGroup(i, stage){
   curGroup = i;
   const g = GROUPS[i];
   document.getElementById('g-title').textContent = '第 '+g.n+' 组 · '+PASSAGES[i].title;
@@ -891,7 +931,7 @@ function openGroup(i){
   document.getElementById('auto-speak').checked = meta().autoSpeak;
   go('group');
   renderStageStepper();
-  setStage('flash');
+  setStage(stage || 'flash');
 }
 function curStageState(){
   const n = GROUPS[curGroup].n;
@@ -902,9 +942,10 @@ function renderStageStepper(){
   const stepper = document.getElementById('stage-stepper');
   if(!stepper) return;
   const st = curStageState();
+  const shortcut = groupProgress(GROUPS[curGroup].n).shortcut;   // 词都在今日任务学过 → 全部关卡开放
   stepper.innerHTML = '';
   STAGES.forEach((s,i)=>{
-    const unlocked = (i===0 || st[STAGES[i-1].key]);
+    const unlocked = (i===0 || st[STAGES[i-1].key] || shortcut);
     const state = st[s.key] ? 'done' : (unlocked ? '' : 'lock');
     const b = document.createElement('button');
     b.className = 'step'+(state?' '+state:'')+(curMode===s.key?' on':'');
@@ -930,7 +971,8 @@ function completeStage(s){
   const gp = progress.groups[n] || (progress.groups[n] = {});
   gp.stages = gp.stages || {};
   if(!gp.stages[s]){ gp.stages[s] = true; addXp(2); }
-  const allDone = STAGES.every(x=>gp.stages[x.key]);
+  // 走完四关算完成；词都在今日任务学过的组，完形过关就算完成
+  const allDone = STAGES.every(x=>gp.stages[x.key]) || (s==='cloze' && groupProgress(n).shortcut);
   if(allDone && !gp.done){ gp.done = true; burst(); }
   save();
   renderStageStepper();
@@ -1386,7 +1428,7 @@ function renderReview(){
   const mastered = Object.values(w).filter(x=>x.mastered).length;
   const learning = Object.keys(w).length - mastered;
   const due = dueWords();
-  const groupsDone = Object.values(progress.groups).filter(g=>g.done).length;
+  const groupsDone = GROUPS.filter(g=>groupProgress(g.n).done).length;
   document.getElementById('rv-due').textContent = due.length;
   document.getElementById('rv-learning').textContent = learning;
   document.getElementById('rv-mastered').textContent = mastered;
@@ -1719,7 +1761,7 @@ function renderTaskCard(){
   const sel = newPerDaySetting();
   const opts = [['auto','按考试进度（'+autoNewPerDay()+' 个）'],['5','5 个'],['10','10 个'],['15','15 个'],['20','20 个'],['30','30 个']]
     .map(([v,t])=>`<option value="${v}" ${String(sel)===v?'selected':''}>${t}</option>`).join('');
-  const setting = `<div class="set">每天新词 <select onchange="setNewPerDay(this.value)">${opts}</select></div>`;
+  const setting = `<div class="set">每天新词 <select onchange="setNewPerDay(this.value)">${opts}</select></div>` + syncTipHtml();
   el.classList.toggle('done', !!m.taskDone);
   if(m.taskDone){
     const more = unlearnedWords().length > 0;
@@ -1728,12 +1770,13 @@ function renderTaskCard(){
       <h2>✅ 今天完成了！连续 ${curStreak()} 天 🔥</h2>
       <div class="chips"><span class="chip g">今天学了 ${m.newToday||0} 个新词</span>${p.rev?'<span class="chip o">还有 '+p.rev+' 个到期复习</span>':''}</div>
       ${p.rev ? '<button class="btn big" onclick="startToday(false)">▶ 把剩下的复习做完 · 约 '+estMinutes(p.rev,0)+' 分钟</button>' : ''}
+      ${clozeSuggestHtml(pendingClozeGroups()[0], false)}
       ${more ? '<button class="btn ghost" onclick="startToday(true)">➕ 有余力？再学 5 个新词</button>' : ''}
       ${setting}`;
     return;
   }
   if(!p.rev && !p.neu){
-    el.innerHTML = `<div class="lab">🎯 今日任务</div><h2>今天没有要复习的词，新词也学完了 🎉</h2>${setting}`;
+    el.innerHTML = `<div class="lab">🎯 今日任务</div><h2>今天没有要复习的词，新词也学完了 🎉</h2>${clozeSuggestHtml(pendingClozeGroups()[0], false)}${setting}`;
     return;
   }
   el.innerHTML = `
@@ -1748,6 +1791,11 @@ function renderTaskCard(){
     ${setting}`;
 }
 function setNewPerDay(v){ meta().newPerDay = v; save(); renderHome(); }
+function syncTipHtml(){
+  if(meta().hideSyncTip) return '';
+  return `<div class="sync-tip"><span>💾 手机和电脑的进度<b>不会同步</b>。换装置前，到「复习计划」页汇出，再到另一台汇入。</span><button onclick="hideSyncTip()">知道了</button></div>`;
+}
+function hideSyncTip(){ meta().hideSyncTip = true; save(); renderTaskCard(); }
 
 let td = null;
 function startToday(bonus){
@@ -1762,7 +1810,9 @@ function startToday(bonus){
     shuffle(chunk.slice()).forEach(w=> items.push({t:'newq', w}));
   }
   if(!items.length){ renderHome(); return; }
-  td = { items, i:0, right:0, wrong:0, newDone:0, revDone:0, main:!bonus, lock:false, opts:[] };
+  // 记下开始前哪些组已经全学完，做完后才知道这次"新学完"了哪一组
+  const fullBefore = new Set(GROUPS.filter(g=>groupProgress(g.n).allLearned).map(g=>g.n));
+  td = { items, i:0, right:0, wrong:0, newDone:0, revDone:0, main:!bonus, lock:false, opts:[], fullBefore };
   go('today');
   tdShow();
 }
@@ -1851,6 +1901,9 @@ function tdFinish(){
   document.getElementById('td-bar').style.width = '100%';
   const d = daysLeft(), left = unlearnedWords().length;
   const total = td.right + td.wrong;
+  const pend = pendingClozeGroups();
+  const fresh = pend.find(x=> !td.fullBefore.has(x.g.n));
+  const sug = clozeSuggestHtml(fresh || pend[0], !!fresh);
   document.getElementById('td-pane').innerHTML = `
     <div class="td-card td-sum">
       <div class="big">${first ? '🏆' : '🎉'}</div>
@@ -1862,6 +1915,7 @@ function tdFinish(){
         <div><b>${total ? Math.round(td.right/total*100) : 100}%</b><span>正确率</span></div>
       </div>
       <p style="color:var(--muted);font-size:14px">${d>0 ? '距离四级还有 <b>'+d+'</b> 天，' : ''}还有 <b>${left}</b> 个新词等你。明天见！</p>
+      ${sug}
       <div class="res-actions">
         <button class="btn" onclick="go('home')">回首页</button>
         ${left ? '<button class="btn ghost" onclick="startToday(true)">➕ 再学 5 个新词</button>' : ''}
