@@ -1,6 +1,6 @@
 // 墨墨单词岛 · 离线缓存
 // 改了网站档案后，把版本号 +1，用户下次打开就会拿到新版
-const CACHE = 'momo-word-v2';
+const CACHE = 'momo-word-v3';
 const ASSETS = [
   './', './index.html', './data.js', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png'
