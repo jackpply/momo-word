@@ -220,7 +220,7 @@ h2.sec .bar{width:8px;height:24px;border-radius:6px;background:var(--grad)}
 .foot{margin-top:50px;text-align:center;color:var(--muted);font-size:13px}
 .hide{display:none !important}
 
-/* ===== 谐音 / 例句 / 扩展提示 ===== */
+/* ===== 例句 / 扩展提示 ===== */
 .hom{display:inline-flex;align-items:center;gap:6px;background:#fff4e6;color:#c2410c;border-radius:8px;padding:3px 10px;font-size:13px;font-weight:700;margin-top:8px}
 .hom .lab{font-size:11px;opacity:.65;font-weight:800}
 .ex-line{font-size:13.5px;line-height:1.55;color:#4a4458;margin-top:8px}
@@ -624,7 +624,6 @@ h2.sec .bar{width:8px;height:24px;border-radius:6px;background:var(--grad)}
   <div class="wpop-card">
     <button class="wpop-x" onclick="closeWordPop()">✕</button>
     <div class="wpop-head"><b id="wpop-word"></b><button class="spk" id="wpop-spk" onclick="event.stopPropagation();speakWord(this.dataset.w)" data-w="">🔊</button><span class="ph" id="wpop-pho"></span></div>
-    <div class="hom" id="wpop-hom" style="display:none"><span class="lab">🗣️ 谐音</span><span id="wpop-hom-t"></span></div>
     <div class="wpop-mean" id="wpop-mean"></div>
     <div class="wpop-ex" id="wpop-ex" style="display:none">
       <div class="en"><button class="spk" id="wpop-ex-spk" onclick="event.stopPropagation();speakSentence(this.dataset.ex)" data-ex="">🔊</button><span id="wpop-ex-en"></span></div>
@@ -774,21 +773,26 @@ function editDist(a,b){
 }
 function buildOptions(word, k){
   const idx = wordIndex(), me = idx[word];
-  const correct = { text: meaningOf(word), correct: true };
+  // 只考一个常用义项，避免整段词典释义的长度暴露答案。
+  const oneSense = w => String(w.meaning).split(/[；｜]/)[0].trim();
+  const correct = { text: oneSense(me.w), correct: true };
   const cands = [];
   for(const key in idx){
     if(key===word) continue;
     const o = idx[key];
-    if(o.w.meaning === correct.text) continue;
-    if(me && [...o.gloss].some(x=>me.gloss.has(x))) continue;      // 意思重叠，避免出现两个"正确答案"
-    let s = Math.random()*2;
-    if(me){
-      if([...o.pos].some(x=>me.pos.has(x))) s += 4;                  // 同词性最重要
-      if(o.n === me.n) s += 2;                                        // 同组
-      const dd = editDist(word.toLowerCase(), key.toLowerCase());
-      if(dd<=2) s += 3; else if(key.slice(0,3)===word.slice(0,3)) s += 1.5; // 拼写相近
-    }
-    cands.push([s, o.w.meaning]);
+    const text = oneSense(o.w);
+    if(text === correct.text) continue;
+    // 同词性、释义不重叠，保证干扰性且只有一个正确答案。
+    const samePos = text.split('.')[0] === correct.text.split('.')[0];
+    if([...o.gloss].some(x=>me.gloss.has(x))) continue;
+    let score = Math.random()*2;
+    if(samePos) score += 20;
+    if(!progress.words[key]) score += 10;       // 优先选用户还没背过的词
+    if(o.n === me.n) score -= 4;                 // 避免刚学的一组词互相排除
+    score -= Math.abs(text.length-correct.text.length)*0.25;
+    const dd = editDist(word.toLowerCase(), key.toLowerCase());
+    if(dd<=2) score += 2;                       // 拼写相近的词更有迷惑性
+    cands.push([score, text]);
   }
   cands.sort((a,b)=>b[0]-a[0]);
   const seen = new Set(), dist = [];
@@ -1047,7 +1051,7 @@ function renderFlash(){
     <div class="fcard-wrap">
       <div class="fcard" id="fcard" onclick="this.classList.toggle('flip')">
         <div class="inner">
-          <div class="face front"><div class="big" id="f-word"></div><div class="pho" id="f-pho"></div><div style="color:var(--muted);font-size:13px;margin-top:6px">👆 点击翻面看释义</div></div>
+          <div class="face front"><div class="big" id="f-word"></div><div class="pho" id="f-pho"></div><div id="f-context" style="margin:16px 0;line-height:1.6"></div><div style="color:var(--muted);font-size:13px;margin-top:6px">先读句子猜意思，再点击翻面</div></div>
           <div class="face back"><div class="mean" id="f-mean"></div>
             <div class="hom" id="f-hom"></div>
             <div class="ex-line" id="f-ex"></div>
@@ -1073,8 +1077,9 @@ function flashShow(){
   const e = ENRICH[w.word] || {};
   document.getElementById('f-word').innerHTML = w.word + ' ' + spkWordBtn(w.word);
   document.getElementById('f-pho').textContent = w.phonetic || '';
+  document.getElementById('f-context').textContent = e.ex || '';
   document.getElementById('f-mean').textContent = w.meaning;
-  document.getElementById('f-hom').innerHTML = e.hom ? '<span class="lab">🗣️ 谐音</span> '+e.hom : '';
+  document.getElementById('f-hom').style.display = 'none';
   document.getElementById('f-ex').innerHTML = e.ex ? spkExBtn(e.ex)+'<span class="en">'+e.ex+'</span><div class="cn">'+(e.ex_cn||'')+'</div>' : '';
   const tip = document.getElementById('f-tip');
   if(e.tip){ tip.style.display='block'; document.getElementById('f-tip-t').textContent = e.tip; }
@@ -1184,7 +1189,6 @@ function renderSpell(){
         <button class="btn ghost" onclick="spellOut(this.dataset.w)" data-w="${esc(w.word)}">🔠 拼读字母</button>
       </div>
       <div class="spell-m">${esc(w.meaning)}</div>
-      ${e.hom ? '<div class="spell-hint">🗣️ 谐音：'+esc(e.hom)+'</div>' : ''}
       <div style="margin-top:14px"><input class="spell-input" id="spell-input" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="输入英文单词…" onkeydown="if(event.key==='Enter')spellCheck()"></div>
       <div class="quiz-fb" id="spell-fb"></div>
       <div style="margin-top:14px"><button class="btn ok" onclick="spellCheck()">提交答案 ✔</button>
@@ -1375,13 +1379,13 @@ function gradeCloze(){
   document.getElementById('res-fire').textContent = score===blanks.length?'🏆':score>=blanks.length*0.8?'🎉':score>=blanks.length*0.6?'💪':'🌱';
   document.getElementById('res-title').textContent = score===blanks.length?'太棒了，满分！':score>=blanks.length*0.6?'不错的成绩！':'继续加油！';
   document.getElementById('res-sub').textContent = '第 '+n+' 组 · '+cloze.passage.title;
-  document.getElementById('res-msg').textContent = score===blanks.length?'全部答对！做完后，点击文中带虚线的单词或空格，即可查看释义、谐音和例句。':('答对 '+score+' 个，错了 '+(blanks.length-score)+' 个，错的词已加进明天的复习。'+(clozePassed?'':'正确率未达 '+Math.round(PASS_RATE*100)+'%，这一关还没过，可以再做一次。')+'点击单词或空格可查看释义、谐音和例句。');
+  document.getElementById('res-msg').textContent = score===blanks.length?'全部答对！做完后，点击文中带虚线的单词或空格，即可查看释义和例句。':('答对 '+score+' 个，错了 '+(blanks.length-score)+' 个，错的词已加进明天的复习。'+(clozePassed?'':'正确率未达 '+Math.round(PASS_RATE*100)+'%，这一关还没过，可以再做一次。')+'点击单词或空格可查看释义和例句。');
   res.classList.add('on');
   renderHome();
 }
 function closeResult(){ document.getElementById('overlay').classList.remove('on'); }
 
-/* ===== 词条查询弹窗（谐音/释义/例句/扩展提示） ===== */
+/* ===== 词条查询弹窗（释义/例句/扩展提示） ===== */
 function showWordPop(word){
   const w = String(word).toLowerCase();
   const e = ENRICH[w];
@@ -1390,9 +1394,6 @@ function showWordPop(word){
   document.getElementById('wpop-spk').dataset.w = w;
   document.getElementById('wpop-pho').textContent = e ? phoneticOf(w) : '';
   if(e){
-    const hom = e.hom || '';
-    document.getElementById('wpop-hom').style.display = hom ? 'inline-flex' : 'none';
-    document.getElementById('wpop-hom-t').textContent = hom;
     document.getElementById('wpop-mean').textContent = meaningOf(w);
     const hasEx = !!e.ex;
     document.getElementById('wpop-ex').style.display = hasEx ? 'block' : 'none';
@@ -1402,7 +1403,6 @@ function showWordPop(word){
     if(tip) document.getElementById('wpop-tip-t').textContent = tip;
   } else {
     const pd = PROSEDICT[w];
-    document.getElementById('wpop-hom').style.display = 'none';
     document.getElementById('wpop-tip').style.display = 'none';
     document.getElementById('wpop-mean').textContent = pd ? pd.m : '（未收录该词）';
     const hasEx = !!(pd && pd.ex);
@@ -1456,7 +1456,7 @@ function renderBank(){
   all.forEach(w=>{
     const st = progress.words[w.word] && progress.words[w.word].mastered ? '✅' : '';
     const e = ENRICH[w.word] || {};
-    const hom = e.hom ? `<div class="hom"><span class="lab">🗣️ 谐音</span> ${e.hom}</div>` : '';
+    const hom = '';
     const ex = e.ex ? `<div class="ex-line">${spkExBtn(e.ex)}<span class="en">${e.ex}</span><div class="cn">${e.ex_cn||''}</div></div>` : '';
     const tip = e.tip ? `<div class="tip-mini">💡 ${e.tip}</div>` : '';
     const el = document.createElement('div');
@@ -1597,7 +1597,7 @@ function reviewChoose(oi){
   } else {
     const e = ENRICH[word] || {};
     applyReview(word, false);
-    fb.textContent = '❌ 忘了。正确释义：' + meaningOf(word) + (e.hom ? '（谐音：'+e.hom+'）' : '') + (isRetry ? '' : ' · 本轮最后会再考一次');
+    fb.textContent = '❌ 忘了。正确释义：' + meaningOf(word) + (isRetry ? '' : ' · 本轮最后会再考一次');
     fb.className = 'quiz-fb no';
     if(!isRetry){ rvRetry.add(word); rvQueue.push(word); }
   }
@@ -1671,7 +1671,7 @@ document.addEventListener('keydown', function(e){
   if(document.getElementById('view-today').classList.contains('on') && td && !td.lock){
     const it = td.items[td.i];
     if(!it) return;
-    if(it.t==='learn' && (e.key==='Enter' || e.key===' ')){ e.preventDefault(); tdNext(); }
+    if(it.t==='learn' && (e.key==='Enter' || e.key===' ')){ e.preventDefault(); document.getElementById('td-reveal').classList.contains('hide') ? tdReveal() : tdNext(); }
     else if(it.t!=='learn' && /^[1-4]$/.test(e.key) && td.opts[+e.key-1]){ tdChoose(+e.key-1); }
   }
 });
@@ -1897,11 +1897,15 @@ function tdShow(){
         <span class="td-tag new">✨ 新词</span>
         <div class="quiz-word">${esc(w.word)} ${spkWordBtn(w.word)}</div>
         <div class="quiz-pho" style="margin-bottom:6px">${esc(w.phonetic||'')}</div>
-        ${e.hom ? '<div class="hom"><span class="lab">🗣️ 谐音</span>'+esc(e.hom)+'</div>' : ''}
-        <div class="mean">${esc(w.meaning)}</div>
-        ${e.ex ? '<div class="ex-line"><span class="en">'+esc(e.ex)+'</span><br><span class="cn">'+esc(e.ex_cn||'')+'</span></div>' : ''}
-        ${e.tip ? '<div class="tip-mini">💡 '+esc(e.tip)+'</div>' : ''}
-        <button class="btn" onclick="tdNext()">记住了，下一个 →</button>
+        <div style="margin:12px 0;color:var(--muted)">先读句子，猜猜这个词在这里表达什么。</div>
+        ${e.ex ? '<div class="ex-line"><button class="spk" onclick="speakSentence(this.dataset.ex)" data-ex="'+esc(e.ex)+'">🔊</button><span class="en">'+esc(e.ex)+'</span></div>' : ''}
+        <div id="td-reveal" class="hide">
+          <div class="mean">${esc(w.meaning)}</div>
+          ${e.ex_cn ? '<div class="ex-line"><span class="cn">'+esc(e.ex_cn)+'</span></div>' : ''}
+          ${e.tip ? '<div class="tip-mini">💡 '+esc(e.tip)+'</div>' : ''}
+        </div>
+        <button class="btn" id="td-reveal-btn" onclick="tdReveal()">看看意思 →</button>
+        <button class="btn hide" id="td-next-btn" onclick="tdNext()">下一词 →</button>
         <div class="kbd-hint">按 Enter 或空白键继续</div>
       </div>`;
   } else {
@@ -1927,6 +1931,11 @@ function tdShow(){
   }
   if(meta().autoSpeak) speakWord(it.w);
 }
+function tdReveal(){
+  document.getElementById('td-reveal').classList.remove('hide');
+  document.getElementById('td-reveal-btn').classList.add('hide');
+  document.getElementById('td-next-btn').classList.remove('hide');
+}
 function tdChoose(oi){
   if(td.lock) return;
   td.lock = true;
@@ -1948,7 +1957,7 @@ function tdChoose(oi){
     td.wrong++;
     if(it.t !== 'retry') td.items.push({t:'retry', w:it.w});
     const e = ENRICH[it.w] || {};
-    fb.textContent = '❌ ' + meaningOf(it.w) + (e.hom ? '（谐音：'+e.hom+'）' : '') + (it.t!=='retry' ? ' · 最后会再考一次' : '');
+    fb.textContent = '❌ ' + meaningOf(it.w) + (it.t!=='retry' ? ' · 最后会再考一次' : '');
     fb.className = 'quiz-fb no';
   }
   save();
